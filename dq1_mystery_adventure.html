@@ -1,0 +1,516 @@
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000}
+#game{
+  font-family:'DotGothic16',monospace;
+  background:#000;
+  color:#fff;
+  max-width:640px;
+  margin:0 auto;
+  padding:8px;
+  image-rendering:pixelated;
+  min-height:480px;
+  position:relative;
+}
+#screen{
+  background:#000;
+  border:3px solid #888;
+  position:relative;
+  overflow:hidden;
+}
+#map-area{
+  width:100%;
+  height:240px;
+  background:#222;
+  position:relative;
+  overflow:hidden;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+canvas#map{
+  image-rendering:pixelated;
+  image-rendering:crisp-edges;
+}
+#status-panel{
+  position:absolute;
+  top:6px;left:6px;
+  background:#000;
+  border:2px solid #fff;
+  padding:6px 10px;
+  font-size:11px;
+  line-height:1.7;
+  min-width:130px;
+  z-index:10;
+}
+#status-panel .name{font-size:12px;margin-bottom:2px}
+#cmd-panel{
+  position:absolute;
+  top:6px;right:6px;
+  background:#000;
+  border:2px solid #fff;
+  padding:6px 12px;
+  font-size:12px;
+  line-height:2;
+  z-index:10;
+  min-width:160px;
+}
+#cmd-panel div{cursor:pointer;padding:0 4px}
+#cmd-panel div:hover,#cmd-panel div.selected{background:#fff;color:#000}
+#cmd-title{text-align:center;margin-bottom:2px}
+#msg-box{
+  background:#000;
+  border:2px solid #fff;
+  padding:10px 14px;
+  font-size:13px;
+  line-height:1.9;
+  min-height:90px;
+  position:relative;
+}
+#msg-text{white-space:pre-wrap;word-break:break-all}
+#choices{margin-top:8px}
+#choices div{
+  cursor:pointer;
+  padding:2px 8px;
+  display:inline-block;
+  margin-right:8px;
+}
+#choices div:hover,#choices div.sel{background:#fff;color:#000}
+#bottom-bar{
+  background:#000;
+  border:2px solid #fff;
+  border-top:none;
+  padding:4px 10px;
+  font-size:11px;
+  color:#aaa;
+  text-align:right;
+}
+.blink{animation:blink .8s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+#location-label{
+  text-align:center;
+  font-size:11px;
+  color:#aaa;
+  background:#000;
+  border-left:2px solid #fff;
+  border-right:2px solid #fff;
+  padding:3px;
+}
+</style>
+
+<div id="game">
+<div id="screen">
+  <div id="location-label">　ラダトームじょう　おうのま　</div>
+  <div id="map-area">
+    <canvas id="map" width="288" height="224"></canvas>
+    <div id="status-panel">
+      <div class="name">ゆうしゃ</div>
+      <div>レベル　１</div>
+      <div>ＨＰ　２０</div>
+      <div>ＭＰ　０</div>
+      <div>Ｇ　０</div>
+    </div>
+    <div id="cmd-panel">
+      <div id="cmd-title">コマンド</div>
+      <div data-cmd="talk">はなす</div>
+      <div data-cmd="look">しらべる</div>
+      <div data-cmd="think">かんがえる</div>
+      <div data-cmd="notes">てがかり</div>
+    </div>
+  </div>
+  <div id="msg-box">
+    <div id="msg-text"></div>
+    <div id="choices"></div>
+    <div id="cursor-area"></div>
+  </div>
+</div>
+<div id="bottom-bar">
+  ★てがかり：<span id="clue-count">0</span>/6　　★はんにん：<span id="solved">？？？</span>
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById('map');
+const ctx=canvas.getContext('2d');
+const TILE=16;
+
+const T={FLOOR:0,WALL:1,DOOR:2,CHEST:3,STAIRS:4,THRONE:5,BODY:6,PILLAR:7};
+const COLORS={
+  [T.FLOOR]:'#8B4513',
+  [T.WALL]:'#555',
+  [T.DOOR]:'#8B6914',
+  [T.CHEST]:'#DAA520',
+  [T.STAIRS]:'#666',
+  [T.THRONE]:'#B8860B',
+  [T.BODY]:'#CC0000',
+  [T.PILLAR]:'#777',
+};
+
+const MAP=[
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,7,0,0,0,0,0,5,0,0,0,0,0,7,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,3,0,0,0,0,0,0,0,0,0,3,0,0,0,1],
+  [1,0,0,0,0,0,0,0,6,0,0,0,0,0,0,0,0,1],
+  [1,0,7,0,0,0,0,0,0,0,0,0,0,0,7,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,1,1],
+];
+
+const NPCS=[
+  {id:'king',x:8,y:2,color:'#FFD700',name:'おう',dead:true},
+  {id:'guard1',x:3,y:8,color:'#4488FF',name:'へいし１'},
+  {id:'guard2',x:14,y:8,color:'#4488FF',name:'へいし２'},
+  {id:'minister',x:5,y:4,color:'#FF88AA',name:'だいじん'},
+  {id:'mage',x:12,y:4,color:'#AA44FF',name:'まどうし'},
+];
+
+let player={x:8,y:10};
+let clues=new Set();
+let gamePhase='intro';
+let msgQueue=[];
+let msgIdx=0;
+let waitChoice=false;
+let currentChoices=[];
+let choiceCallback=null;
+let accusations={guard1:false,guard2:false,minister:false,mage:false};
+let solved=false;
+
+const STORY={
+  intro:[
+    'ＮＰＣに「はなす」、\nあやしいものを「しらべる」ことで\nてがかりを集めよう。',
+    '「てがかり」を６つ集めたら\n「はんにん」をとくてい できるぞ！',
+  ],
+  king_dead:'＊おう は くびに ふしぎな きずを\nおって たおれていた。\nむろに あとかたも ない。\nこれは… ちっそくさつか？',
+  guard1_1:'＊「ゆうべ おそく、まどうし どのが\nひとり おうのまに はいるのを\nわしは みたのだ。」',
+  guard1_2:'＊「わしは ずっと とびらの そとに\nいたぞ。 なにも きこえなかった。\nちかいに かけて まことのこと じゃ。」',
+  guard2_1:'＊「ゆうべの じゅもんしょ の ページが\nやぶれて おったのを みかけた。\nまどうし どのが やぶいたのかも…」',
+  guard2_2:'＊「とびら は ずっと しまっておった。\n おうが なんびとも にゅうしつを\n きんじていたからな。」',
+  minister_1:'＊「わたくしは ゆうべ ずっと\nじぶんの へやで ゆうしょくの\nけっさんを しておりました。」',
+  minister_clean:'＊（だいじんの てに ちは ついておらず、\nかれの へやの かがみに\nくらいかげが みえた…）',
+  minister_2:'＊「おうさまが おかくれになるとは…\nきんこには おうの おうかんを\nのぞくほか、なにも ありません。」',
+  mage_1:'＊「おうのま に いった？ そんな\nこと ない。 わしは ゆうべ\nずっと じゅもん の けんきゅうを。」',
+  mage_2:'＊（まどうしの そでに わずかに\nちのしみが ついていた。\nしかも じゅもんしょの ページが…！）',
+  chest_left:'＊ひだりの はこ には なにも なかった。\nしかし… ふたに あやしい\nきずあとが あった。',
+  chest_right:'＊みぎの はこ の なか、\nよごれた てぶくろが いちまい。\nちいさく 「Ｍ」の もじが…！',
+  pillar_left:'＊はしらの うしろに かくれた\nあしあとが いくつか みつかった。\nかなり おおきな あしあとだ。',
+  pillar_right:'＊はしらに ちいさな きりくずが\nついていた。 じゅもんに つかう\nとくしゅな ざいりょうの においが。',
+  door:'＊とびら は かた く しまっている。\nかぎは どこか… かぎあな に\nこすれた あとが あった。',
+  throne:'＊おうの しんざ。 うしろに\nひそかに いどうした あとが。\n だれかが ここに かくれていた？',
+  accusation_mage_correct:[
+    '＊「… もうよい。 わしが やった。」',
+    '＊まどうしは くびを うなだれた。\n「おうは わしの じゅもんけんきゅうを\nきんじようとしていた。だから…」',
+    '＊「まどうしが じゅもんで とびらを\nあけ、のどをしめて… その後\nじゅもんで とびらを とじたのだ！」',
+    '＊じけんは かいけつした！\nゆうしゃよ、ありがとう。\nラダトームの へいわを まもった！',
+  ],
+  accusation_wrong:'＊「わ、わしは やっておらん！\nとんでもない ぬれぎぬだ！」\n\nちがうようだ… もっとしらべよう。',
+  clue_hint:'＊まだ てがかりが たりない。\nもっと はなして しらべてから\nはんにんを かんがえよう。',
+};
+
+function drawMap(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let r=0;r<MAP.length;r++){
+    for(let c=0;c<MAP[r].length;c++){
+      const t=MAP[r][c];
+      ctx.fillStyle=COLORS[t]||'#333';
+      ctx.fillRect(c*TILE,r*TILE,TILE,TILE);
+      if(t===T.WALL){
+        ctx.fillStyle='#444';
+        ctx.fillRect(c*TILE+1,r*TILE+1,TILE-2,TILE-2);
+      }
+      if(t===T.PILLAR){
+        ctx.fillStyle='#999';
+        ctx.beginPath();
+        ctx.arc(c*TILE+8,r*TILE+8,5,0,Math.PI*2);
+        ctx.fill();
+      }
+      if(t===T.THRONE){
+        ctx.fillStyle='#DAA520';
+        ctx.fillRect(c*TILE+2,r*TILE+2,TILE-4,TILE-4);
+        ctx.fillStyle='#FFD700';
+        ctx.fillRect(c*TILE+4,r*TILE+4,TILE-8,TILE-8);
+      }
+      if(t===T.CHEST){
+        ctx.fillStyle='#8B4513';
+        ctx.fillRect(c*TILE+1,r*TILE+3,TILE-2,TILE-5);
+        ctx.fillStyle='#DAA520';
+        ctx.fillRect(c*TILE+1,r*TILE+3,TILE-2,4);
+        ctx.fillStyle='#FFD700';
+        ctx.fillRect(c*TILE+6,r*TILE+6,4,4);
+      }
+      if(t===T.DOOR){
+        ctx.fillStyle='#5C3D11';
+        ctx.fillRect(c*TILE+1,r*TILE,TILE-2,TILE);
+        ctx.fillStyle='#8B6914';
+        ctx.fillRect(c*TILE+4,r*TILE+2,TILE-8,TILE-4);
+      }
+      if(t===T.STAIRS){
+        for(let s=0;s<4;s++){
+          ctx.fillStyle=s%2===0?'#888':'#666';
+          ctx.fillRect(c*TILE+s*4,r*TILE+s*3,TILE-s*4,4);
+        }
+      }
+    }
+  }
+  NPCS.forEach(n=>{
+    if(n.dead){
+      ctx.fillStyle='#800000';
+      ctx.fillRect(n.x*TILE+2,n.y*TILE+6,TILE-4,TILE-10);
+      ctx.fillStyle='#FFD700';
+      ctx.fillRect(n.x*TILE+4,n.y*TILE+4,8,8);
+      ctx.fillStyle='#CC0000';
+      ctx.fillRect(n.x*TILE+3,n.y*TILE+10,TILE-6,3);
+    } else {
+      ctx.fillStyle=n.color;
+      ctx.fillRect(n.x*TILE+3,n.y*TILE+4,10,8);
+      ctx.fillStyle='#FFE0B2';
+      ctx.fillRect(n.x*TILE+4,n.y*TILE+2,8,6);
+      ctx.fillStyle='#000';
+      ctx.fillRect(n.x*TILE+5,n.y*TILE+3,2,2);
+      ctx.fillRect(n.x*TILE+9,n.y*TILE+3,2,2);
+    }
+  });
+  ctx.fillStyle='#fff';
+  ctx.fillRect(player.x*TILE+3,player.y*TILE+4,10,8);
+  ctx.fillStyle='#FFE0B2';
+  ctx.fillRect(player.x*TILE+4,player.y*TILE+2,8,6);
+  ctx.fillStyle='#000';
+  ctx.fillRect(player.x*TILE+5,player.y*TILE+3,2,2);
+  ctx.fillRect(player.x*TILE+9,player.y*TILE+3,2,2);
+  ctx.fillStyle='#4488FF';
+  ctx.fillRect(player.x*TILE+3,player.y*TILE+10,10,6);
+  ctx.fillStyle='#888';
+  ctx.fillRect(player.x*TILE+1,player.y*TILE+4,3,6);
+}
+
+function showMsg(text,choices,cb){
+  document.getElementById('msg-text').textContent=text;
+  const cd=document.getElementById('choices');
+  cd.innerHTML='';
+  document.getElementById('cursor-area').innerHTML='';
+  if(choices&&choices.length){
+    waitChoice=true;
+    currentChoices=choices;
+    choiceCallback=cb;
+    choices.forEach((c,i)=>{
+      const d=document.createElement('div');
+      d.textContent=c.label;
+      if(i===0)d.classList.add('sel');
+      d.onclick=()=>{
+        waitChoice=false;
+        cd.innerHTML='';
+        cb(c.value);
+      };
+      cd.appendChild(d);
+    });
+  } else {
+    const cur=document.createElement('span');
+    cur.textContent='▼';
+    cur.className='blink';
+    document.getElementById('cursor-area').appendChild(cur);
+  }
+}
+
+function addClue(id){
+  if(!clues.has(id)){
+    clues.add(id);
+    document.getElementById('clue-count').textContent=clues.size;
+  }
+}
+
+function handleCmd(cmd){
+  if(waitChoice)return;
+  if(gamePhase==='intro'){
+    gamePhase='explore';
+    showMsg('＊おうが しんで いる！\nみんな おうのまに あつまっており\nとびらは しまっていた。だれが？');
+    return;
+  }
+  if(cmd==='notes'){
+    if(clues.size===0){showMsg('＊まだ てがかりが ない。\nひとびとに はなしかけたり、\nあやしいものを しらべてみよう。');return;}
+    let txt='＊てがかりメモ：\n';
+    if(clues.has('guard1_saw'))txt+='・へいし１：まどうしを みた\n';
+    if(clues.has('guard2_spell'))txt+='・じゅもんしょの ページが やぶれた\n';
+    if(clues.has('mage_lie'))txt+='・まどうしが うそを ついている\n';
+    if(clues.has('mage_blood'))txt+='・まどうしの そでに ちのしみ\n';
+    if(clues.has('chest_glove'))txt+='・「Ｍ」の てぶくろ はっけん\n';
+    if(clues.has('pillar_spell'))txt+='・じゅもんの ざいりょうの にお い\n';
+    showMsg(txt.trim());
+    return;
+  }
+  if(cmd==='think'){
+    if(clues.size<4){showMsg(STORY.clue_hint);return;}
+    showMsg('＊てがかりを まとめると…\nはんにんを にてい できそうだ。\nだれを うたがう？',
+      [{label:'へいし１',value:'guard1'},{label:'へいし２',value:'guard2'},{label:'だいじん',value:'minister'},{label:'まどうし',value:'mage'},{label:'やめる',value:'cancel'}],
+      function(v){
+        if(v==='cancel'){showMsg('＊もう すこし しらべてみよう。');return;}
+        if(v==='mage'){
+          let i=0;
+          function nextLine(){
+            if(i<STORY.accusation_mage_correct.length){
+              showMsg(STORY.accusation_mage_correct[i]);
+              i++;
+              setTimeout(nextLine,i<STORY.accusation_mage_correct.length?2200:0);
+              if(i===STORY.accusation_mage_correct.length){
+                document.getElementById('solved').textContent='まどうし';
+                solved=true;
+              }
+            }
+          }
+          nextLine();
+        } else {
+          showMsg(STORY.accusation_wrong);
+        }
+      }
+    );
+    return;
+  }
+  if(cmd==='talk'){
+    const adj=getAdjacent();
+    if(adj.length===0){showMsg('＊ちかくに だれも いない。\nひとびとに ちかづいてから\nはなしかけよう。');return;}
+    if(adj.length===1){talkTo(adj[0]);}
+    else{
+      showMsg('だれに はなしかける？',
+        adj.map(n=>({label:n.name,value:n.id})).concat([{label:'やめる',value:'cancel'}]),
+        v=>{if(v!=='cancel'){const n=NPCS.find(x=>x.id===v);if(n)talkTo(n);}}
+      );
+    }
+    return;
+  }
+  if(cmd==='look'){
+    const obj=getNearObject();
+    if(obj){examineObject(obj);}
+    else{showMsg('＊なにも めにつく ものは ない。\nひとに はなしかけたり もっと\nちかくで しらべてみよう。');}
+    return;
+  }
+}
+
+function talkTo(npc){
+  if(npc.dead){showMsg(STORY.king_dead);addClue('king_dead');return;}
+  if(npc.id==='guard1'){
+    showMsg(STORY.guard1_1);
+    addClue('guard1_saw');
+    setTimeout(()=>showMsg(STORY.guard1_2),2200);
+    return;
+  }
+  if(npc.id==='guard2'){
+    showMsg(STORY.guard2_1);
+    addClue('guard2_spell');
+    setTimeout(()=>showMsg(STORY.guard2_2),2200);
+    return;
+  }
+  if(npc.id==='minister'){
+    showMsg(STORY.minister_1);
+    setTimeout(()=>{
+      showMsg(STORY.minister_clean);
+      addClue('minister_alibi');
+      setTimeout(()=>showMsg(STORY.minister_2),2000);
+    },2200);
+    return;
+  }
+  if(npc.id==='mage'){
+    showMsg(STORY.mage_1);
+    setTimeout(()=>{
+      showMsg(STORY.mage_2);
+      addClue('mage_lie');
+      addClue('mage_blood');
+    },2200);
+    return;
+  }
+}
+
+function getNearObject(){
+  const r=player.y,c=player.x;
+  const neighbors=[[r-1,c],[r+1,c],[r,c-1],[r,c+1],[r,c]];
+  for(const[nr,nc]of neighbors){
+    if(nr<0||nr>=MAP.length||nc<0||nc>=MAP[0].length)continue;
+    const t=MAP[nr][nc];
+    if(t===T.CHEST)return{type:'chest',r:nr,c:nc};
+    if(t===T.PILLAR)return{type:'pillar',r:nr,c:nc};
+    if(t===T.DOOR||t===T.STAIRS)return{type:'door',r:nr,c:nc};
+    if(t===T.THRONE)return{type:'throne',r:nr,c:nc};
+  }
+  return null;
+}
+
+function examineObject(obj){
+  if(obj.type==='chest'){
+    if(obj.c<9){showMsg(STORY.chest_left);}
+    else{showMsg(STORY.chest_right);addClue('chest_glove');}
+    return;
+  }
+  if(obj.type==='pillar'){
+    if(obj.c<9){showMsg(STORY.pillar_left);}
+    else{showMsg(STORY.pillar_right);addClue('pillar_spell');}
+    return;
+  }
+  if(obj.type==='door'){showMsg(STORY.door);return;}
+  if(obj.type==='throne'){showMsg(STORY.throne);return;}
+}
+
+function getAdjacent(){
+  const found=[];
+  NPCS.forEach(n=>{
+    const dx=Math.abs(n.x-player.x);
+    const dy=Math.abs(n.y-player.y);
+    if(dx+dy<=2)found.push(n);
+  });
+  return found;
+}
+
+document.querySelectorAll('#cmd-panel div[data-cmd]').forEach(d=>{
+  d.addEventListener('click',()=>handleCmd(d.dataset.cmd));
+});
+
+document.addEventListener('keydown',e=>{
+  const moves={'ArrowUp':[0,-1],'ArrowDown':[0,1],'ArrowLeft':[-1,0],'ArrowRight':[1,0]};
+  if(moves[e.key]){
+    e.preventDefault();
+    const[dx,dy]=moves[e.key];
+    const nx=player.x+dx,ny=player.y+dy;
+    if(ny>=0&&ny<MAP.length&&nx>=0&&nx<MAP[0].length){
+      const t=MAP[ny][nx];
+      if(t!==T.WALL&&t!==T.PILLAR&&t!==T.THRONE&&t!==T.CHEST&&t!==T.DOOR&&t!==T.STAIRS){
+        player.x=nx;player.y=ny;
+        drawMap();
+      }
+    }
+    return;
+  }
+  if(e.key==='Enter'||e.key===' '){
+    e.preventDefault();
+    if(waitChoice){
+      const sel=document.querySelector('#choices div.sel');
+      if(sel)sel.click();
+    } else {
+      if(gamePhase==='intro'){handleCmd('intro');}
+    }
+  }
+  if(e.key==='ArrowUp'&&waitChoice){
+    const sels=document.querySelectorAll('#choices div');
+    let idx=0;sels.forEach((d,i)=>{if(d.classList.contains('sel'))idx=i;});
+    sels.forEach(d=>d.classList.remove('sel'));
+    sels[Math.max(0,idx-1)].classList.add('sel');
+  }
+  if(e.key==='ArrowDown'&&waitChoice){
+    const sels=document.querySelectorAll('#choices div');
+    let idx=0;sels.forEach((d,i)=>{if(d.classList.contains('sel'))idx=i;});
+    sels.forEach(d=>d.classList.remove('sel'));
+    sels[Math.min(sels.length-1,idx+1)].classList.add('sel');
+  }
+});
+
+document.getElementById('msg-box').addEventListener('click',()=>{
+  if(!waitChoice&&gamePhase==='intro'){handleCmd('intro');}
+});
+
+drawMap();
+showMsg('＊なんてことのない オープニングだが、\nここでは ドラクエふうに\nなぞを とく ぼうけんが はじまる。\n\n【▼クリックでつづける】');
+gamePhase='intro';
+</script>
